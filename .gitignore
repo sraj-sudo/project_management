@@ -1,0 +1,11 @@
+data/issues.db
+uploads/*
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+env/
+venv/
+node_modules/
+.streamlit/
+!uploads/.gitkeep
