@@ -1,13 +1,56 @@
+# utils/drive.py
+
+import os
+import cloudinary
+import cloudinary.uploader
 import streamlit as st
 
-def upload_to_drive(file_path, filename):
+# Load from Hugging Face Secrets or .env
+CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+API_KEY = os.getenv("CLOUDINARY_API_KEY")
+API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
+# Configure Cloudinary
+cloudinary.config(
+    cloud_name=CLOUD_NAME,
+    api_key=API_KEY,
+    api_secret=API_SECRET
+)
+
+
+def upload_file(file, issue_id):
     """
-    Placeholder for Google Drive API integration.
-    Currently falls back to local storage only.
+    Upload file to Cloudinary and return public URL
     """
-    # In a real implementation, you'd use service account or OAuth2
-    # from googleapiclient.discovery import build
-    # from googleapiclient.http import MediaFileUpload
-    
-    # st.info("Google Drive Integration is not yet configured. Using local storage.")
-    return None # Return drive_link if successful
+
+    try:
+        # Generate unique filename
+        filename = f"{issue_id}_{file.name}"
+
+        # Upload
+        result = cloudinary.uploader.upload(
+            file,
+            public_id=filename,
+            folder="ticketing_system",
+            resource_type="auto"
+        )
+
+        return result.get("secure_url")
+
+    except Exception as e:
+        st.warning("Cloud upload failed, using local fallback")
+        return save_locally(file, issue_id)
+
+
+def save_locally(file, issue_id):
+    """
+    Fallback if Cloudinary fails (for local dev)
+    """
+
+    os.makedirs("uploads", exist_ok=True)
+    file_path = f"uploads/{issue_id}_{file.name}"
+
+    with open(file_path, "wb") as f:
+        f.write(file.getbuffer())
+
+    return file_path# Return drive_link if successful
