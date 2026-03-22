@@ -7,7 +7,7 @@ from utils.helpers import get_status_color, get_priority_color, format_timestamp
 # Page Config
 st.set_page_config(page_title="Dashboard", page_icon="📊", layout="wide")
 
-# Page Guard: Admin and Developer allowed
+# Page Guard
 require_role(['admin', 'developer'])
 
 st.title("📊 Ticket Dashboard")
@@ -24,7 +24,7 @@ with st.expander("🔍 Filters & Search", expanded=True):
     with col4:
         f_search = st.text_input("Search (ID or Title)", placeholder="Search...")
 
-# Fetch Data with Role Context
+# Role & User
 role = get_role()
 username = st.session_state.user['username']
 
@@ -35,69 +35,88 @@ filters = {
     'search': f_search
 }
 
-# Backend enforcement: Developers only see assigned issues
+# Fetch issues
 if role == 'developer':
     issues = get_issues(filters, current_user=username, current_user_role='developer')
 else:
     issues = get_issues(filters)
 
+# Display issues
 if not issues:
     st.info("No issues found matching the criteria.")
 else:
     for issue in issues:
         with st.container():
             col1, col2, col3, col4, col5 = st.columns([1, 3, 1, 1, 1])
+
             with col1:
                 st.markdown(f"**{issue['issue_id']}**")
+
             with col2:
                 st.markdown(f"**{issue['title']}**")
                 assignee_label = f"| Assigned: {issue['assigned_to']}" if issue['assigned_to'] else "| Unassigned"
                 st.caption(f"Reporter: {issue['reporter']} {assignee_label}")
+
             with col3:
                 color = get_status_color(issue['status'])
-                st.markdown(f'<span style="background-color: {color}; color: white; padding: 2px 8px; border-radius: 5px;">{issue["status"]}</span>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<span style="background-color: {color}; color: white; padding: 2px 8px; border-radius: 5px;">{issue["status"]}</span>',
+                    unsafe_allow_html=True
+                )
+
             with col4:
                 p_color = get_priority_color(issue['priority'])
-                st.markdown(f'<span style="color: {p_color}; font-weight: bold;">{issue["priority"]}</span>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<span style="color: {p_color}; font-weight: bold;">{issue["priority"]}</span>',
+                    unsafe_allow_html=True
+                )
+
             with col5:
                 if st.button("Details", key=f"details_{issue['issue_id']}"):
                     st.session_state.current_issue_id = issue['issue_id']
+
             st.markdown("---")
 
-# Detail Sidebar Logic (Expanded for Role Enforcement)
+# Sidebar Detail View
 if 'current_issue_id' in st.session_state:
     details = get_issue_details(st.session_state.current_issue_id)
+
     if details:
-        st.sidebar.markdown(f"### Ticket: {details['issue_id']}")
+        st.sidebar.markdown(f"### 🎯 Ticket: {details['issue_id']}")
         st.sidebar.markdown(f"**Title:** {details['title']}")
         st.sidebar.markdown(f"**Description:** \n {details['description']}")
-        
+
+        # 🔥 FILE PREVIEW (Cloudinary)
+        if details.get("file_url"):
+            st.sidebar.markdown("**Attachment:**")
+            if details["file_url"].endswith((".png", ".jpg", ".jpeg")):
+                st.sidebar.image(details["file_url"], use_container_width=True)
+            else:
+                st.sidebar.markdown(f"[View File]({details['file_url']})")
+
         st.sidebar.markdown("---")
-        
-        # Status Update Logic
-        st.sidebar.subheader("Action Center")
-        
-        # Determine allowed statuses based on role
+
+        # Action Center
+        st.sidebar.subheader("⚙️ Action Center")
+
+        # Status options
         if role == 'admin':
             status_opts = ["New", "Review", "In Progress", "Testing", "Closed"]
         elif role == 'developer':
-            # ENFORCED WORKFLOW: New -> In Progress -> Testing -> Closed
-            # Current logic in db.py:
-            # allowed_transitions = {
-            #     'New': ['In Progress'],
-            #     'In Progress': ['Testing'],
-            #     'Testing': ['Closed', 'In Progress']
-            # }
-            # We filter visually too:
             cur = details['status']
-            if cur == 'New': status_opts = ['New', 'In Progress']
-            elif cur == 'In Progress': status_opts = ['In Progress', 'Testing']
-            elif cur == 'Testing': status_opts = ['Testing', 'Closed', 'In Progress']
-            else: status_opts = [cur]
+            if cur == 'New':
+                status_opts = ['New', 'In Progress']
+            elif cur == 'In Progress':
+                status_opts = ['In Progress', 'Testing']
+            elif cur == 'Testing':
+                status_opts = ['Testing', 'Closed', 'In Progress']
+            else:
+                status_opts = [cur]
         else:
             status_opts = [details['status']]
-            
+
         new_status = st.sidebar.selectbox("New Status", status_opts, index=0)
+
         if st.sidebar.button("Execute Transition", key=f"up_status_{details['issue_id']}"):
             try:
                 if update_issue_status(details['issue_id'], new_status, username, role):
@@ -105,12 +124,19 @@ if 'current_issue_id' in st.session_state:
                     st.rerun()
             except Exception as e:
                 st.error(str(e))
-        
-        # Assignment (Admin Only)
+
+        # Assignment (Admin only)
         if is_admin():
             st.sidebar.markdown("---")
+
             users = [u['username'] for u in list_users() if u['role'] in ['admin', 'developer']]
-            assignee = st.sidebar.selectbox("Assign To", [""] + users, index=0 if not details['assigned_to'] else users.index(details['assigned_to']) + 1)
+
+            default_index = 0
+            if details['assigned_to'] in users:
+                default_index = users.index(details['assigned_to']) + 1
+
+            assignee = st.sidebar.selectbox("Assign To", [""] + users, index=default_index)
+
             if st.sidebar.button("Save Assignment", key=f"assign_{details['issue_id']}"):
                 try:
                     assign_issue(details['issue_id'], assignee if assignee else None, role)
@@ -118,24 +144,30 @@ if 'current_issue_id' in st.session_state:
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
-        
-        # Comments & History
+
+        # Comments
         st.sidebar.markdown("---")
-        st.sidebar.markdown("**Discussion**")
+        st.sidebar.markdown("**💬 Discussion**")
+
         for comment in details['comments']:
             st.sidebar.caption(f"{comment['user']} ({format_timestamp(comment['timestamp'])})")
             st.sidebar.markdown(f"> {comment['text']}")
-            
+
         new_comment = st.sidebar.text_area("Add Comment", key="new_comment")
-        if st.sidebar.button("Post"):
+
+        if st.sidebar.button("Post Comment"):
             add_comment(details['issue_id'], username, new_comment)
             st.rerun()
 
-        if st.sidebar.checkbox("Audit History"):
+        # Audit History
+        if st.sidebar.checkbox("📜 Show Audit History"):
             st.sidebar.markdown("**Issue History**")
             for h in details['history']:
-                st.sidebar.caption(f"{format_timestamp(h['timestamp'])}: {h['old_status']} ➡️ {h['new_status']} by {h['changed_by']}")
+                st.sidebar.caption(
+                    f"{format_timestamp(h['timestamp'])}: {h['old_status']} ➡️ {h['new_status']} by {h['changed_by']}"
+                )
 
+# Reset View
 st.sidebar.markdown("---")
 if st.sidebar.button("Reset View"):
     if 'current_issue_id' in st.session_state:
