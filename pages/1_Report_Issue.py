@@ -1,6 +1,8 @@
+import streamlit as st
 from utils.auth import require_role
-from utils.db import add_issue
-from utils.helpers import save_uploaded_file, get_priority_color
+from utils.db import add_issue, get_connection
+from utils.helpers import get_priority_color
+from utils.drive import upload_file
 
 # Page Config
 st.set_page_config(page_title="Report Issue", page_icon="📝", layout="wide")
@@ -17,13 +19,24 @@ with st.form("report_issue_form", clear_on_submit=True):
     with col1:
         title = st.text_input("Title*", placeholder="Brief summary of the issue")
         issue_type = st.selectbox("Type*", ["Bug", "Enhancement", "Feedback"])
-        priority = st.select_slider("Priority*", options=["P2", "P1", "P0"], value="P2", help="P0 is highest priority")
+        priority = st.select_slider(
+            "Priority*", 
+            options=["P2", "P1", "P0"], 
+            value="P2", 
+            help="P0 is highest priority"
+        )
         
     with col2:
         module = st.text_input("Module", placeholder="e.g., Auth, Dashboard, API")
-        uploaded_file = st.file_uploader("Screenshot / File", type=["png", "jpg", "jpeg", "pdf", "csv", "txt"])
+        uploaded_file = st.file_uploader(
+            "Screenshot / File", 
+            type=["png", "jpg", "jpeg", "pdf", "csv", "txt"]
+        )
         
-    description = st.text_area("Description*", placeholder="Provide details, steps to reproduce, or expected behavior...")
+    description = st.text_area(
+        "Description*", 
+        placeholder="Provide details, steps to reproduce, or expected behavior..."
+    )
     
     submit = st.form_submit_button("Submit Issue")
     
@@ -32,7 +45,7 @@ with st.form("report_issue_form", clear_on_submit=True):
             st.error("Please fill in all required fields (*)")
         else:
             try:
-                # Prepare data
+                # Step 1: Prepare data
                 issue_data = {
                     'title': title,
                     'description': description,
@@ -42,26 +55,47 @@ with st.form("report_issue_form", clear_on_submit=True):
                     'reporter': st.session_state.user['username']
                 }
                 
-                # Add to DB first to get ID (for file naming)
+                # Step 2: Insert issue first → get issue_id
                 issue_id = add_issue(issue_data)
-                
-                # Save file if any
-                file_path = save_uploaded_file(uploaded_file, issue_id)
-                
-                # Update DB with file path if it was saved
-                if file_path:
-                    from utils.db import get_connection
+
+                # Step 3: Upload file to Cloudinary (if exists)
+                file_url = None
+
+                if uploaded_file:
+                    # File validation
+                    if uploaded_file.size > 5 * 1024 * 1024:
+                        st.error("File too large (max 5MB)")
+                        st.stop()
+
+                    if uploaded_file.type not in [
+                        "image/png", "image/jpeg", "application/pdf", 
+                        "text/csv", "text/plain"
+                    ]:
+                        st.error("Unsupported file type")
+                        st.stop()
+
+                    file_url = upload_file(uploaded_file, issue_id)
+
+                # Step 4: Update DB with file_url
+                if file_url:
                     conn = get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE issues SET file_path = ? WHERE issue_id = ?", (file_path, issue_id))
+
+                    cursor.execute(
+                        "UPDATE issues SET file_url = ? WHERE issue_id = ?",
+                        (file_url, issue_id)
+                    )
+
                     conn.commit()
                     conn.close()
-                
+
+                # Success message
                 st.success(f"Successfully reported issue: **{issue_id}**")
                 st.balloons()
-                
+
             except Exception as e:
                 st.error(f"Error submitting issue: {e}")
 
+# Sidebar Info
 st.sidebar.markdown("---")
 st.sidebar.info("Reporter: " + st.session_state.user['username'])
