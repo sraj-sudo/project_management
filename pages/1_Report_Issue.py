@@ -1,7 +1,7 @@
 import streamlit as st
+import random
 from utils.auth import require_role
 from utils.db import add_issue, get_connection
-from utils.helpers import get_priority_color
 from utils.drive import upload_file
 
 # Page Config
@@ -19,13 +19,10 @@ with st.form("report_issue_form", clear_on_submit=True):
     with col1:
         title = st.text_input("Title*", placeholder="Brief summary of the issue")
         issue_type = st.selectbox("Type*", ["Bug", "Enhancement", "Feedback"])
-        priority = st.select_slider(
-            "Priority*", 
-            options=["P2", "P1", "P0"], 
-            value="P2", 
-            help="P0 is highest priority"
-        )
         
+        # ❌ REMOVE USER PRIORITY CONTROL
+        st.markdown("**Priority will be assigned by developer/admin**")
+
     with col2:
         module = st.text_input("Module", placeholder="e.g., Auth, Dashboard, API")
         uploaded_file = st.file_uploader(
@@ -45,24 +42,25 @@ with st.form("report_issue_form", clear_on_submit=True):
             st.error("Please fill in all required fields (*)")
         else:
             try:
-                # Step 1: Prepare data
+                # 🔥 STEP 1: AUTO ASSIGN RANDOM PRIORITY
+                priority = random.choice(["P0", "P1", "P2"])
+
                 issue_data = {
                     'title': title,
                     'description': description,
                     'type': issue_type,
-                    'priority': priority,
+                    'priority': priority,  # auto-assigned
                     'module': module,
                     'reporter': st.session_state.user['username']
                 }
                 
-                # Step 2: Insert issue first → get issue_id
+                # STEP 2: Create issue → get ID
                 issue_id = add_issue(issue_data)
 
-                # Step 3: Upload file to Cloudinary (if exists)
+                # STEP 3: Upload file (Cloudinary)
                 file_url = None
 
                 if uploaded_file:
-                    # File validation
                     if uploaded_file.size > 5 * 1024 * 1024:
                         st.error("File too large (max 5MB)")
                         st.stop()
@@ -76,7 +74,7 @@ with st.form("report_issue_form", clear_on_submit=True):
 
                     file_url = upload_file(uploaded_file, issue_id)
 
-                # Step 4: Update DB with file_url
+                # STEP 4: Save file_url
                 if file_url:
                     conn = get_connection()
                     cursor = conn.cursor()
@@ -89,8 +87,8 @@ with st.form("report_issue_form", clear_on_submit=True):
                     conn.commit()
                     conn.close()
 
-                # Success message
-                st.success(f"Successfully reported issue: **{issue_id}**")
+                st.success(f"Issue submitted successfully: **{issue_id}**")
+                st.info("Priority will be reviewed and set by the developer/admin.")
                 st.balloons()
 
             except Exception as e:
